@@ -1,0 +1,71 @@
+name: Lydia Pharma Job Search V2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Unzip V2 engine
+        run: |
+          rm -rf engine
+          mkdir engine
+          unzip -q Lydia_Pharma_Job_Search_Engine_V2.zip -d engine
+          test -f engine/Biotech-Job-Search-Engine-main/pyproject.toml
+          test -f engine/Biotech-Job-Search-Engine-main/src/biotech_jobs/cli.py
+
+      - name: Install engine
+        working-directory: engine/Biotech-Job-Search-Engine-main
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[browser]'
+          playwright install chromium --with-deps
+
+      - name: Validate V2 profile
+        working-directory: engine/Biotech-Job-Search-Engine-main
+        run: python scripts/check_profile.py
+
+      - name: Run pharma-first V2 search
+        working-directory: engine/Biotech-Job-Search-Engine-main
+        env:
+          PYTHONUNBUFFERED: '1'
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p output
+          biotech-jobs \
+            --config config/companies.yml \
+            --db output/jobs.sqlite \
+            --csv output/ranked_jobs.csv \
+            --new-csv output/new_matches.csv \
+            --priority-csv output/priority_matches.csv \
+            --min-score 50 \
+            --priority-score 65 \
+            --request-timeout 12 \
+            --company-timeout 75 \
+            | tee output/run_summary.json
+
+      - name: Upload V2 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lydia-pharma-v2-results
+          path: |
+            engine/Biotech-Job-Search-Engine-main/output/ranked_jobs.csv
+            engine/Biotech-Job-Search-Engine-main/output/priority_matches.csv
+            engine/Biotech-Job-Search-Engine-main/output/new_matches.csv
+            engine/Biotech-Job-Search-Engine-main/output/run_summary.json
+            engine/Biotech-Job-Search-Engine-main/output/jobs.sqlite
+          if-no-files-found: warn
+          retention-days: 30
